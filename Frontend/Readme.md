@@ -1,5 +1,4 @@
 # Frontend Setup
-
 Follow the steps below to run the frontend locally:
 
 ### 1. Navigate to the frontend directory
