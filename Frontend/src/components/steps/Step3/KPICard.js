@@ -1,0 +1,6 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { TrendingUp, Info } from 'lucide-react';
+import { Card } from '@/components/common/Card';
+export const KPICard = ({ kpi }) => {
+    return (_jsx(Card, { padding: "md", className: "hover:shadow-md transition-shadow", children: _jsxs("div", { className: "flex items-start gap-3", children: [_jsx("div", { className: "p-2 bg-primary-50 rounded-lg", children: _jsx(TrendingUp, { className: "w-5 h-5 text-primary-600" }) }), _jsxs("div", { className: "flex-1", children: [_jsx("h4", { className: "text-base font-semibold text-gray-900 mb-2", children: kpi.name }), kpi.description && (_jsx("p", { className: "text-sm text-gray-600 mb-3", children: kpi.description })), _jsxs("div", { className: "bg-gray-50 rounded-lg p-3 mb-3", children: [_jsx("p", { className: "text-xs font-medium text-gray-500 mb-1", children: "DAX Formula" }), _jsx("code", { className: "text-xs text-gray-900 font-mono break-all", children: kpi.formula })] }), kpi.business_context && (_jsxs("div", { className: "flex items-start gap-2 text-sm", children: [_jsx(Info, { className: "w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" }), _jsxs("p", { className: "text-gray-600", children: [_jsx("span", { className: "font-medium", children: "Business Context:" }), ' ', kpi.business_context] })] }))] })] }) }));
+};

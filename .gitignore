@@ -1,0 +1,77 @@
+### OS / Editor
+.DS_Store
+Thumbs.db
+.DS_Store?
+.vscode/
+.idea/
+
+### Environment / Secrets
+# dotenv
+.env
+.env.*
+# virtual envs
+.venv/
+venv/
+env/
+.venv*/
+.venv3.11/
+# pyenv
+.python-version
+# keys / certs
+*.pem
+*.key
+*.crt
+
+### Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+.pytest_cache/
+.mypy_cache/
+pip-wheel-metadata/
+pip-log.txt
+htmlcov/
+coverage/
+.coverage
+build/
+dist/
+*.egg-info/
+
+### Databases
+*.db
+*.sqlite3
+
+### Node / Frontend
+node_modules/
+Frontend/node_modules/
+Frontend/dist/
+Frontend/.turbo
+/.turbo
+
+### Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+### Jupyter
+.ipynb_checkpoints/
+
+### macOS
+.DS_Store
+
+### Misc
+*.swp
+*.swo
+*.bak
+*.tmp
+coverage/
+
+# Local IDE / system files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
