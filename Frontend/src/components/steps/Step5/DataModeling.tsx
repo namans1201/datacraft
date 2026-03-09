@@ -33,7 +33,7 @@ export const DataModeling: React.FC = () => {
   } = useAgentStore();
 
   const [schemaView, setSchemaView] = useState<'bronze' | 'silver'>(
-    (modeling_schema_view as 'bronze' | 'silver') || 'silver'
+    (modeling_schema_view as 'bronze' | 'silver') || 'bronze'
   );
   const [isGenerating, setIsGenerating] = useState(false);
   const [parsedModel, setParsedModel] = useState<{
@@ -104,8 +104,8 @@ export const DataModeling: React.FC = () => {
           <Select
             label="Select Schema to Model"
             options={[
-              { value: 'silver', label: 'Silver (Standardized - Recommended)' },
-              { value: 'bronze', label: 'Bronze (Raw Data)' },
+              { value: 'bronze', label: 'Bronze (Raw Data - Recommended for Step 2)' },
+              { value: 'silver', label: 'Silver (Requires Step 3 mappings)' },
             ]}
             value={schemaView}
             onChange={(e) => setSchemaView(e.target.value as 'bronze' | 'silver')}

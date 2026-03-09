@@ -108,22 +108,47 @@ async def api_read_files(req: ReadFilesRequest):
                 "sensitivity": tag_row
             }
 
-        # --- THE FIX: STORE THE STATE ---
-        # 1. Create the unique ID (Must match the one in generate-silver)
+        # Merge into existing state so multi-file upload accumulates datasets.
         state_id = f"{req.catalog}_{req.schema_name}"
-        
-        # 2. Create the AgentState instance
-        # We store the actual DataFrames (dfs) so 'generate-silver' doesn't have to reconstruct them
-        new_state = AgentState(
-            dbfs_path=req.dbfs_path,
-            dfs=dfs,  
-            df_heads=formatted_heads,
-            df_dtypes=dtypes,
-            xml_root_tags=xml_root_tags,
-            pii_columns=sorted(list(set(all_pii))),
-            phi_columns=sorted(list(set(all_phi))),
-            sensitive_metadata={"bronze": bronze_metadata}
-        )
+        existing_state = agent_states.get(state_id)
+
+        if existing_state:
+            merged_dfs = {**(existing_state.dfs or {}), **dfs}
+            merged_heads = {**(existing_state.df_heads or {}), **formatted_heads}
+            merged_dtypes = {**(existing_state.df_dtypes or {}), **dtypes}
+            merged_xml = {**(existing_state.xml_root_tags or {}), **xml_root_tags}
+
+            existing_bronze = ((existing_state.sensitive_metadata or {}).get("bronze", {}) or {})
+            merged_bronze = {**existing_bronze, **bronze_metadata}
+
+            merged_pii = sorted(list(set((existing_state.pii_columns or []) + all_pii)))
+            merged_phi = sorted(list(set((existing_state.phi_columns or []) + all_phi)))
+
+            new_state = existing_state.copy(update={
+                "dbfs_path": req.dbfs_path,
+                "dfs": merged_dfs,
+                "df_heads": merged_heads,
+                "df_dtypes": merged_dtypes,
+                "xml_root_tags": merged_xml,
+                "pii_columns": merged_pii,
+                "phi_columns": merged_phi,
+                "sensitive_metadata": {"bronze": merged_bronze},
+                "catalog": req.catalog,
+                "schema_name": req.schema_name,
+            })
+        else:
+            new_state = AgentState(
+                dbfs_path=req.dbfs_path,
+                dfs=dfs,
+                df_heads=formatted_heads,
+                df_dtypes=dtypes,
+                xml_root_tags=xml_root_tags,
+                pii_columns=sorted(list(set(all_pii))),
+                phi_columns=sorted(list(set(all_phi))),
+                sensitive_metadata={"bronze": bronze_metadata},
+                catalog=req.catalog,
+                schema_name=req.schema_name,
+            )
 
         # 3. Save to the global store
         agent_states[state_id] = new_state
@@ -135,8 +160,8 @@ async def api_read_files(req: ReadFilesRequest):
                 "success": True,
                 "data": {
                     "dbfs_path": req.dbfs_path,
-                    "df_heads": formatted_heads,
-                    "df_dtypes": dtypes,
+                    "df_heads": new_state.df_heads,
+                    "df_dtypes": new_state.df_dtypes,
                     "pii_columns": new_state.pii_columns,
                     "phi_columns": new_state.phi_columns
                 }

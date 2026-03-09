@@ -3,7 +3,7 @@ import { Upload, File } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface FileUploaderProps {
-  onFileSelect: (file: File) => void;
+  onFileSelect: (files: File[]) => void;
 }
 
 export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect }) => {
@@ -26,7 +26,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect }) => {
 
       const files = Array.from(e.dataTransfer.files);
       if (files.length > 0) {
-        onFileSelect(files[0]);
+        onFileSelect(files);
       }
     },
     [onFileSelect]
@@ -35,7 +35,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect }) => {
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length > 0) {
-      onFileSelect(files[0]);
+      onFileSelect(files);
     }
   };
 
@@ -53,6 +53,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect }) => {
     >
       <input
         type="file"
+        multiple
         className="hidden"
         accept=".csv,.xlsx,.parquet,.json,.xml"
         onChange={handleFileInput}

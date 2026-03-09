@@ -7,99 +7,140 @@ interface ERDiagramProps {
   graph?: ERDiagramGraph;
 }
 
-const TYPE_ORDER: Array<'dimension' | 'table' | 'fact'> = ['dimension', 'table', 'fact'];
-const CARD_WIDTH = 240;
-const CARD_PADDING = 16;
-const COLUMN_GAP = 140;
-const ROW_GAP = 24;
-const NODE_HEIGHT = (base: number) => Math.max(base, 120);
+type NodeType = 'dimension' | 'table' | 'fact';
 
 interface LayoutNode {
   id: string;
   tableName: string;
-  type: 'dimension' | 'fact' | 'table';
-  columns: { name: string; data_type?: string; is_primary_key?: boolean; is_foreign_key?: boolean }[];
+  type: NodeType;
+  columns: Array<{
+    name: string;
+    data_type?: string;
+    is_primary_key?: boolean;
+    is_foreign_key?: boolean;
+  }>;
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
-interface LayoutEdge {
-  from: LayoutNode;
-  to: LayoutNode;
+interface LayoutRelation {
+  id: string;
+  fromNode: LayoutNode;
+  toNode: LayoutNode;
   fromPoint: { x: number; y: number };
   toPoint: { x: number; y: number };
+  midPoint: { x: number; y: number };
+  fromCardinality: '1' | 'N';
+  toCardinality: '1' | 'N';
+  label: string;
 }
 
-function parseSqlDiagram(sqlText: string): ERDiagramGraph | null {
-  const cleanSql = sqlText.replace(/`/g, '').replace(/IF NOT EXISTS/gi, '');
-  const tableRegex = /CREATE\\s+TABLE\\s+([\\w.]+)\\s*\\(([^)]+)\\)/gi;
-  const tables: Record<string, ERDiagramType['tables'][number]> = {};
-  let match: RegExpExecArray | null;
+const TYPE_ORDER: NodeType[] = ['dimension', 'table', 'fact'];
+const CARD_WIDTH = 280;
+const CARD_MIN_HEIGHT = 120;
+const CARD_HEADER_HEIGHT = 34;
+const CARD_ROW_HEIGHT = 20;
+const LANE_GAP = 180;
+const ROW_GAP = 36;
 
-  while ((match = tableRegex.exec(cleanSql)) !== null) {
-    const name = match[1];
-    const colsSection = match[2];
-    const columns = colsSection
-      .split(',')
-      .map((line) => line.trim())
-      .filter((line) => line && !/CONSTRAINT|PRIMARY KEY|FOREIGN KEY/i.test(line))
-      .map((line) => {
-        const [colName, type = ''] = line.split(/\\s+/);
-        return {
-          name: colName,
-          data_type: type,
-          is_primary_key: /PRIMARY KEY/i.test(line),
-          is_foreign_key: /REFERENCES/i.test(line),
-        };
-      });
-    tables[name] = { name, columns };
-  }
-
-  if (!Object.keys(tables).length) return null;
-  return { nodes: Object.values(tables).map((table) => ({ table_name: table.name, columns: table.columns, table_type: classifyTableType(table.name) })), edges: [] };
-}
-
-function classifyTableType(name?: string): 'dimension' | 'fact' | 'table' {
+function classifyTableType(name?: string): NodeType {
   const normalized = (name || '').toLowerCase();
   if (normalized.startsWith('dim_')) return 'dimension';
   if (normalized.startsWith('fact_')) return 'fact';
   return 'table';
 }
 
+function parseSqlFallback(sqlText: string): ERDiagramGraph | null {
+  const cleanSql = sqlText.replace(/`/g, '').replace(/IF NOT EXISTS/gi, '');
+  const createRegex = /CREATE\s+TABLE\s+([\w.]+)\s*\(([\s\S]*?)\)\s*;?/gi;
+  const nodes: ERDiagramGraph['nodes'] = [];
+
+  let match: RegExpExecArray | null;
+  while ((match = createRegex.exec(cleanSql)) !== null) {
+    const tableName = match[1];
+    const columns = match[2]
+      .split(',')
+      .map((part) => part.trim())
+      .filter((line) => line && !/^(CONSTRAINT|PRIMARY|FOREIGN|UNIQUE)\b/i.test(line))
+      .map((line) => {
+        const tokens = line.split(/\s+/);
+        return {
+          name: tokens[0] || 'column',
+          data_type: tokens[1],
+          is_primary_key: /PRIMARY\s+KEY/i.test(line),
+          is_foreign_key: /REFERENCES/i.test(line),
+        };
+      });
+
+    nodes.push({
+      table_name: tableName,
+      table_type: classifyTableType(tableName),
+      columns,
+    });
+  }
+
+  if (!nodes.length) return null;
+  return { nodes, edges: [] };
+}
+
 function normalizeDiagram(diagram?: ERDiagramType): ERDiagramGraph | null {
-  if (!diagram || !diagram.tables.length) return null;
+  if (!diagram?.tables?.length) return null;
   return {
     nodes: diagram.tables.map((table) => ({
       table_name: table.name,
-      columns: table.columns,
       table_type: classifyTableType(table.name),
+      columns: table.columns,
     })),
-    edges: diagram.relationships.map((rel) => ({
+    edges: (diagram.relationships || []).map((rel) => ({
       from_table: rel.from_table,
       from_column: rel.from_column,
       to_table: rel.to_table,
       to_column: rel.to_column,
+      from_cardinality: rel.from_cardinality || 'N',
+      to_cardinality: rel.to_cardinality || '1',
     })),
   };
 }
 
-function buildLayout(graph: ERDiagramGraph): { nodes: LayoutNode[]; edges: LayoutEdge[]; width: number; height: number } {
-  const columns: Record<string, LayoutNode[]> = {};
-  TYPE_ORDER.forEach((type) => {
-    columns[type] = [];
-  });
+function sanitizeGraph(graph: ERDiagramGraph): ERDiagramGraph {
+  return {
+    nodes: (graph.nodes || []).map((n) => ({
+      ...n,
+      table_type: TYPE_ORDER.includes(n.table_type as NodeType)
+        ? (n.table_type as NodeType)
+        : classifyTableType(n.table_name),
+      columns: n.columns || [],
+    })),
+    edges: (graph.edges || []).map((e) => ({
+      ...e,
+      from_cardinality: e.from_cardinality || 'N',
+      to_cardinality: e.to_cardinality || '1',
+    })),
+  };
+}
+
+function buildLayout(graph: ERDiagramGraph): {
+  width: number;
+  height: number;
+  nodes: LayoutNode[];
+  relations: LayoutRelation[];
+} {
+  const lanes: Record<NodeType, LayoutNode[]> = {
+    dimension: [],
+    table: [],
+    fact: [],
+  };
 
   graph.nodes.forEach((node) => {
-    const type = TYPE_ORDER.includes(node.table_type) ? node.table_type : 'table';
-    const columnsList = columns[type];
-    const height = CARD_PADDING * 2 + 24 + node.columns.length * 20;
-    columnsList.push({
+    const type = (node.table_type as NodeType) || 'table';
+    const height = Math.max(CARD_MIN_HEIGHT, CARD_HEADER_HEIGHT + 16 + node.columns.length * CARD_ROW_HEIGHT);
+    lanes[type].push({
       id: `${type}:${node.table_name}`,
       tableName: node.table_name,
       type,
-      columns: node.columns,
+      columns: node.columns || [],
       x: 0,
       y: 0,
       width: CARD_WIDTH,
@@ -107,133 +148,156 @@ function buildLayout(graph: ERDiagramGraph): { nodes: LayoutNode[]; edges: Layou
     });
   });
 
+  const positioned: LayoutNode[] = [];
   let maxHeight = 0;
-  const nodePositions: LayoutNode[] = [];
-  TYPE_ORDER.forEach((type, idx) => {
-    const nodes = columns[type];
-    nodes.forEach((node, row) => {
-      node.x = idx * (CARD_WIDTH + COLUMN_GAP);
-      node.y = row * (NODE_HEIGHT(node.height) + ROW_GAP);
+
+  TYPE_ORDER.forEach((type, laneIdx) => {
+    lanes[type].forEach((node, rowIdx) => {
+      node.x = laneIdx * (CARD_WIDTH + LANE_GAP) + 24;
+      node.y = rowIdx * (CARD_MIN_HEIGHT + ROW_GAP) + 24;
+      positioned.push(node);
       maxHeight = Math.max(maxHeight, node.y + node.height);
-      nodePositions.push(node);
     });
   });
 
-  const edges: LayoutEdge[] = graph.edges
-    .map((edge) => {
-      const fromNode = nodePositions.find((n) => n.tableName === edge.from_table);
-      const toNode = nodePositions.find((n) => n.tableName === edge.to_table);
+  const relations: LayoutRelation[] = graph.edges
+    .map((edge, idx) => {
+      const fromNode = positioned.find((n) => n.tableName === edge.from_table);
+      const toNode = positioned.find((n) => n.tableName === edge.to_table);
       if (!fromNode || !toNode) return null;
-      const fromPoint = { x: fromNode.x + fromNode.width, y: fromNode.y + fromNode.height / 2 };
-      const toPoint = { x: toNode.x, y: toNode.y + toNode.height / 2 };
-      return { from: fromNode, to: toNode, fromPoint, toPoint };
-    })
-    .filter(Boolean) as LayoutEdge[];
 
-  const width = Math.max(TYPE_ORDER.length * (CARD_WIDTH + COLUMN_GAP), 0);
-  return { nodes: nodePositions, edges, width, height: Math.max(maxHeight, 0) };
+      const fromPoint =
+        fromNode.x <= toNode.x
+          ? { x: fromNode.x + fromNode.width, y: fromNode.y + fromNode.height / 2 }
+          : { x: fromNode.x, y: fromNode.y + fromNode.height / 2 };
+      const toPoint =
+        fromNode.x <= toNode.x
+          ? { x: toNode.x, y: toNode.y + toNode.height / 2 }
+          : { x: toNode.x + toNode.width, y: toNode.y + toNode.height / 2 };
+
+      const midPoint = {
+        x: (fromPoint.x + toPoint.x) / 2,
+        y: (fromPoint.y + toPoint.y) / 2,
+      };
+
+      return {
+        id: `rel-${idx}`,
+        fromNode,
+        toNode,
+        fromPoint,
+        toPoint,
+        midPoint,
+        fromCardinality: (edge.from_cardinality || 'N') as '1' | 'N',
+        toCardinality: (edge.to_cardinality || '1') as '1' | 'N',
+        label: `${edge.from_column} to ${edge.to_column}`,
+      };
+    })
+    .filter(Boolean) as LayoutRelation[];
+
+  const width = TYPE_ORDER.length * (CARD_WIDTH + LANE_GAP) + 80;
+  const height = Math.max(maxHeight + 60, 280);
+  return { width, height, nodes: positioned, relations };
+}
+
+function relationshipDiamond(mid: { x: number; y: number }, size = 14): string {
+  return `${mid.x} ${mid.y - size}, ${mid.x + size} ${mid.y}, ${mid.x} ${mid.y + size}, ${mid.x - size} ${mid.y}`;
 }
 
 export const ERDiagram: React.FC<ERDiagramProps> = ({ sql, diagram, graph }) => {
-  const parsedGraph = useMemo(() => {
-    return graph?.nodes?.length ? graph : normalizeDiagram(diagram) || parseSqlDiagram(sql);
+  const sourceGraph = useMemo(() => {
+    const pick = graph?.nodes?.length ? graph : normalizeDiagram(diagram) || parseSqlFallback(sql);
+    return pick ? sanitizeGraph(pick) : null;
   }, [graph, diagram, sql]);
 
-  if (!parsedGraph || !parsedGraph.nodes.length) {
+  if (!sourceGraph || !sourceGraph.nodes.length) {
     return (
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-6 min-h-[200px]">
-        <div className="text-sm text-gray-500">ER diagram will appear here once the model is generated.</div>
+      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm mb-6">
+        <p className="text-sm text-gray-500">Generate model SQL to render ER diagram.</p>
       </div>
     );
   }
 
-  const layout = buildLayout(parsedGraph);
+  const layout = buildLayout(sourceGraph);
 
   return (
-    <div className="bg-gradient-to-br from-white to-slate-50 border border-gray-200 rounded-2xl p-6 shadow-lg mb-6">
-      <div className="flex items-center justify-between mb-4">
-        <h4 className="text-lg font-semibold text-gray-900">Dimensional Model ER Diagram</h4>
+    <div className="bg-gradient-to-br from-white via-slate-50 to-slate-100 border border-gray-200 rounded-2xl p-6 shadow-lg mb-6">
+      <div className="mb-4">
+        <h4 className="text-lg font-semibold text-gray-900">Entity Relationship Diagram</h4>
+        <p className="text-xs text-gray-500 mt-1">
+          Entities, attributes, and relationship cardinality (`1` / `N`) inferred from generated schema.
+        </p>
       </div>
-      <div className="overflow-auto">
-        <svg
-          width={layout.width + 80}
-          height={layout.height + 40}
-          viewBox={`0 0 ${layout.width + 80} ${layout.height + 40}`}
-        >
+
+      <div className="overflow-auto rounded-xl border border-slate-200 bg-white/80">
+        <svg width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`}>
           <defs>
-            <marker
-              id="arrow"
-              viewBox="0 0 6 6"
-              refX="5"
-              refY="3"
-              markerWidth="6"
-              markerHeight="6"
-              orient="auto"
-            >
-              <path d="M0,0 L6,3 L0,6 Z" fill="#2563EB" />
+            <marker id="er-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#334155" />
             </marker>
           </defs>
-          {layout.edges.map((edge, idx) => (
-            <path
-              key={`edge-${idx}`}
-              d={`M${edge.fromPoint.x} ${edge.fromPoint.y} C${edge.fromPoint.x + 40} ${
-                edge.fromPoint.y
-              }, ${edge.toPoint.x - 40} ${edge.toPoint.y}, ${edge.toPoint.x} ${edge.toPoint.y}`}
-              stroke="#2563EB"
-              strokeWidth={2}
-              fill="none"
-              markerEnd="url(#arrow)"
-              opacity={0.85}
-            />
+
+          {layout.relations.map((rel) => (
+            <g key={rel.id}>
+              <line
+                x1={rel.fromPoint.x}
+                y1={rel.fromPoint.y}
+                x2={rel.midPoint.x}
+                y2={rel.midPoint.y}
+                stroke="#475569"
+                strokeWidth={1.8}
+              />
+              <line
+                x1={rel.midPoint.x}
+                y1={rel.midPoint.y}
+                x2={rel.toPoint.x}
+                y2={rel.toPoint.y}
+                stroke="#475569"
+                strokeWidth={1.8}
+                markerEnd="url(#er-arrow)"
+              />
+              <polygon points={relationshipDiamond(rel.midPoint)} fill="#E2E8F0" stroke="#64748B" strokeWidth={1.4} />
+              <text x={rel.midPoint.x} y={rel.midPoint.y + 4} textAnchor="middle" fontSize="9" fill="#334155">
+                R
+              </text>
+              <text x={rel.midPoint.x} y={rel.midPoint.y - 20} textAnchor="middle" fontSize="9" fill="#334155">
+                {rel.label}
+              </text>
+              <text x={rel.fromPoint.x + (rel.fromPoint.x < rel.midPoint.x ? 10 : -10)} y={rel.fromPoint.y - 8} textAnchor={rel.fromPoint.x < rel.midPoint.x ? 'start' : 'end'} fontSize="11" fontWeight="700" fill="#1D4ED8">
+                {rel.fromCardinality}
+              </text>
+              <text x={rel.toPoint.x + (rel.midPoint.x < rel.toPoint.x ? -10 : 10)} y={rel.toPoint.y - 8} textAnchor={rel.midPoint.x < rel.toPoint.x ? 'end' : 'start'} fontSize="11" fontWeight="700" fill="#166534">
+                {rel.toCardinality}
+              </text>
+            </g>
           ))}
+
           {layout.nodes.map((node) => (
             <g key={node.id}>
-              <foreignObject
-                x={node.x}
-                y={node.y}
-                width={node.width}
-                height={node.height}
-              >
-                <div className="h-full w-full bg-white ring-1 ring-slate-200 rounded-2xl shadow-sm p-4 flex flex-col">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-semibold text-slate-900">{node.tableName}</span>
-                    <span
-                      className={`px-2 py-0.5 text-[10px] font-semibold uppercase rounded-full ${
-                        node.type === 'dimension'
-                          ? 'bg-blue-100 text-blue-700'
-                          : node.type === 'fact'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {node.type}
-                    </span>
-                  </div>
-                  <div className="space-y-1 text-[12px] text-slate-600 flex-1">
-                    {node.columns.map((column) => (
-                      <div key={`${node.id}-${column.name}`} className="flex items-center gap-2">
-                        <span className="font-mono">{column.name}</span>
-                        {column.data_type && <span className="text-xs text-slate-400">{column.data_type}</span>}
-                        {column.is_primary_key && (
-                          <span className="text-xs uppercase text-blue-600 font-semibold">PK</span>
-                        )}
-                        {column.is_foreign_key && (
-                          <span className="text-xs uppercase text-emerald-600 font-semibold">FK</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </foreignObject>
               <rect
                 x={node.x}
                 y={node.y}
                 width={node.width}
                 height={node.height}
-                rx={24}
-                ry={24}
-                fill="transparent"
+                rx={10}
+                ry={10}
+                fill={node.type === 'dimension' ? '#EFF6FF' : node.type === 'fact' ? '#ECFDF5' : '#F8FAFC'}
+                stroke={node.type === 'dimension' ? '#60A5FA' : node.type === 'fact' ? '#34D399' : '#94A3B8'}
+                strokeWidth={1.3}
               />
+              <line x1={node.x} y1={node.y + CARD_HEADER_HEIGHT} x2={node.x + node.width} y2={node.y + CARD_HEADER_HEIGHT} stroke="#CBD5E1" />
+              <text x={node.x + 12} y={node.y + 22} fontSize="13" fontWeight="700" fill="#0F172A">
+                {node.tableName}
+              </text>
+              <text x={node.x + node.width - 12} y={node.y + 22} textAnchor="end" fontSize="9" fontWeight="700" fill="#334155">
+                {node.type.toUpperCase()}
+              </text>
+              {node.columns.map((column, index) => (
+                <text key={`${node.id}-${column.name}`} x={node.x + 12} y={node.y + CARD_HEADER_HEIGHT + 16 + index * CARD_ROW_HEIGHT} fontSize="11" fill="#334155">
+                  {column.is_primary_key ? 'PK ' : column.is_foreign_key ? 'FK ' : ''}
+                  {column.name}
+                  {column.data_type ? ` : ${column.data_type}` : ''}
+                </text>
+              ))}
             </g>
           ))}
         </svg>

@@ -42,6 +42,11 @@ def sanitize_name(name: str) -> str:
         name = f"t_{name}"
     return name
 
+def is_noise_column(col_name: str) -> bool:
+    """Ignore auto-generated CSV index columns (e.g. Unnamed: 4)."""
+    normalized = (col_name or "").strip().lower()
+    return normalized.startswith("unnamed")
+
 def clean_llm_code_response(raw_text: str) -> str:
     """Strip ```sql fences if present."""
     blocks = re.findall(r"```(?:sql)?\s*(.*?)```", raw_text, re.DOTALL)
@@ -124,6 +129,16 @@ def parse_sql_to_er_diagram(sql_text: str) -> Dict[str, Any]:
                     for pk_col in pk_columns:
                         if pk_col in column_meta:
                             column_meta[pk_col]["is_primary_key"] = True
+                            column_meta[pk_col]["is_unique"] = True
+                continue
+
+            if upper.startswith("UNIQUE"):
+                uq_match = re.search(r"\((.*?)\)", trimmed, re.IGNORECASE | re.DOTALL)
+                if uq_match:
+                    uq_columns = [strip_table_prefix(c.strip()) for c in uq_match.group(1).split(",")]
+                    for uq_col in uq_columns:
+                        if uq_col in column_meta:
+                            column_meta[uq_col]["is_unique"] = True
                 continue
 
             if "FOREIGN KEY" in upper and "REFERENCES" in upper:
@@ -140,12 +155,18 @@ def parse_sql_to_er_diagram(sql_text: str) -> Dict[str, Any]:
                         if local_col in column_meta:
                             column_meta[local_col]["is_foreign_key"] = True
                         ref_col = ref_cols[idx] if idx < len(ref_cols) else (ref_cols[0] if ref_cols else "")
+                        local_unique = bool(
+                            column_meta.get(local_col, {}).get("is_primary_key")
+                            or column_meta.get(local_col, {}).get("is_unique")
+                        )
                         relationships.append(
                             {
                                 "from_table": table_name,
                                 "from_column": local_col,
                                 "to_table": ref_table,
                                 "to_column": ref_col,
+                                "from_cardinality": "1" if local_unique else "N",
+                                "to_cardinality": "1",
                             }
                         )
                 continue
@@ -157,12 +178,14 @@ def parse_sql_to_er_diagram(sql_text: str) -> Dict[str, Any]:
             data_type = col_match.group(2)
             is_pk = "PRIMARY KEY" in upper
             is_fk = "REFERENCES" in upper
+            is_unique = "UNIQUE" in upper
 
             column_meta[column_name] = {
                 "name": column_name,
                 "data_type": data_type,
                 "is_primary_key": is_pk,
                 "is_foreign_key": is_fk,
+                "is_unique": is_unique or is_pk,
             }
 
             if is_fk:
@@ -172,12 +195,18 @@ def parse_sql_to_er_diagram(sql_text: str) -> Dict[str, Any]:
                     re.IGNORECASE | re.DOTALL,
                 )
                 if inline_fk:
+                    local_unique = bool(
+                        column_meta.get(column_name, {}).get("is_primary_key")
+                        or column_meta.get(column_name, {}).get("is_unique")
+                    )
                     relationships.append(
                         {
                             "from_table": table_name,
                             "from_column": column_name,
                             "to_table": strip_table_prefix(inline_fk.group(1)),
                             "to_column": strip_table_prefix(inline_fk.group(2).split(",")[0].strip()),
+                            "from_cardinality": "1" if local_unique else "N",
+                            "to_cardinality": "1",
                         }
                     )
 
@@ -220,6 +249,8 @@ def build_er_graph(er_diagram: Dict[str, Any]) -> Dict[str, Any]:
             "from_column": rel.get("from_column"),
             "to_table": rel.get("to_table"),
             "to_column": rel.get("to_column"),
+            "from_cardinality": rel.get("from_cardinality", "N"),
+            "to_cardinality": rel.get("to_cardinality", "1"),
         })
 
     return {"nodes": nodes, "edges": edges}
@@ -229,7 +260,7 @@ def build_bronze_schema_text(dfs: Dict[str, Any]) -> str:
     for name, df in dfs.items():
         t = sanitize_name(name)
         try:
-            cols = [sanitize_name(c) for c in df.columns]
+            cols = [sanitize_name(c) for c in df.columns if not is_noise_column(str(c))]
         except Exception:
             cols = []
         parts.append(f"Table: {t}\nColumns: {', '.join(cols)}")

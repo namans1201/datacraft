@@ -21,6 +21,8 @@ class ERRelationship(BaseModel):
     from_column: str
     to_table: str
     to_column: str
+    from_cardinality: str = "N"
+    to_cardinality: str = "1"
 
 class ERDiagram(BaseModel):
     tables: List[ERTable] = Field(default_factory=list)
@@ -36,6 +38,8 @@ class DiagramEdge(BaseModel):
     from_column: str
     to_table: str
     to_column: str
+    from_cardinality: str = "N"
+    to_cardinality: str = "1"
 
 class ERDiagramGraph(BaseModel):
     nodes: List[DiagramNode] = Field(default_factory=list)

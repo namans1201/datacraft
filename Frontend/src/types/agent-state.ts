@@ -74,6 +74,8 @@ export interface ERRelationship {
   from_column: string;
   to_table: string;
   to_column: string;
+  from_cardinality?: '1' | 'N';
+  to_cardinality?: '1' | 'N';
 }
 
 export interface DiagramNode {
@@ -87,6 +89,8 @@ export interface DiagramEdge {
   from_column: string;
   to_table: string;
   to_column: string;
+  from_cardinality?: '1' | 'N';
+  to_cardinality?: '1' | 'N';
 }
 
 export interface ERDiagramGraph {

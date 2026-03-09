@@ -24,7 +24,7 @@ async def generate_model(
 
     try:
         # 1. Initialize the agent node
-        modeling_node, _ = get_dimensional_modeling_agent()
+        modeling_node, _ = get_dimensional_modeling_agent(schema_view=req.schema_view)
         
         # 2. Update the view preference in the retrieved state
         state.modeling_schema_view = req.schema_view

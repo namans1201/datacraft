@@ -12,7 +12,7 @@ import { useAgentStore } from '@/store/useAgentStore';
 import toast from 'react-hot-toast';
 export const DataModeling = () => {
     const { catalog, schema, modeling_sql, modeling_schema_view, modeling_er_diagram, modeling_diagram, setModelingSQL, updateState, } = useAgentStore();
-    const [schemaView, setSchemaView] = useState(modeling_schema_view || 'silver');
+    const [schemaView, setSchemaView] = useState(modeling_schema_view || 'bronze');
     const [isGenerating, setIsGenerating] = useState(false);
     const [parsedModel, setParsedModel] = useState(null);
     // Re-parse model on mount if SQL already exists in store
@@ -56,8 +56,8 @@ export const DataModeling = () => {
         }
     };
     return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { children: [_jsx("h2", { className: "text-2xl font-bold text-gray-900 mb-2", children: "Step 2: Dimensional Data Modeling" }), _jsx("p", { className: "text-gray-600", children: "Generate a Kimball-style dimensional model optimized for analytics." })] }), _jsxs(Card, { children: [_jsxs("div", { className: "flex items-center gap-2 mb-4", children: [_jsx(Database, { className: "w-5 h-5 text-primary-600" }), _jsx("h3", { className: "text-lg font-semibold text-gray-900", children: "Model Configuration" })] }), _jsxs("div", { className: "space-y-4", children: [_jsx(Select, { label: "Select Schema to Model", options: [
-                                    { value: 'silver', label: 'Silver (Standardized - Recommended)' },
-                                    { value: 'bronze', label: 'Bronze (Raw Data)' },
+                                    { value: 'bronze', label: 'Bronze (Raw Data - Recommended for Step 2)' },
+                                    { value: 'silver', label: 'Silver (Requires Step 3 mappings)' },
                                 ], value: schemaView, onChange: (e) => setSchemaView(e.target.value) }), _jsx(Button, { variant: "primary", onClick: handleGenerateModel, isLoading: isGenerating, icon: _jsx(Sparkles, { className: "w-4 h-4" }), children: "Generate Dimensional Model SQL" })] })] }), modeling_sql && (_jsx(ERDiagram, { sql: modeling_sql, diagram: modeling_er_diagram, graph: modeling_diagram })), parsedModel && (_jsxs(Card, { children: [_jsxs("div", { className: "flex items-center gap-2 mb-4", children: [_jsx(Grid, { className: "w-5 h-5 text-success-600" }), _jsx("h3", { className: "text-lg font-semibold text-gray-900", children: "Structure Overview" })] }), _jsx(ModelStructure, { dimensions: parsedModel.dimensions, facts: parsedModel.facts })] })), modeling_sql && (_jsxs(Card, { children: [_jsxs("div", { className: "flex items-center justify-between mb-4", children: [_jsx("h3", { className: "text-lg font-semibold text-gray-900", children: "SQL DDL" }), _jsx(Button, { variant: "ghost", size: "sm", onClick: () => {
                                     navigator.clipboard.writeText(modeling_sql);
                                     toast.success('SQL copied');

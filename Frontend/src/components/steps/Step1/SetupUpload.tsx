@@ -27,7 +27,7 @@ export const SetupUpload: React.FC = () => {
   });
 
   const [isCreating, setIsCreating] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
   const handleCreateCatalog = async () => {
@@ -81,16 +81,23 @@ export const SetupUpload: React.FC = () => {
     }
   };
 
-  const handleFileSelect = (file: File) => {
-    setUploadedFile(file);
+  const handleFileSelect = (files: File[]) => {
+    setUploadedFiles((prev) => [...prev, ...files]);
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, idx) => idx !== index));
   };
 
   const handleFileUpload = async () => {
-      if (!uploadedFile) return;
-      if (!form.catalog || !form.schema || !form.token) {
-        toast.error('Catalog, Schema, and Token are required');
-        return;
-      }
+    if (!uploadedFiles.length) {
+      toast.error('Please pick at least one file to upload.');
+      return;
+    }
+    if (!form.catalog || !form.schema || !form.token) {
+      toast.error('Catalog, Schema, and Token are required');
+      return;
+    }
 
       setIsUploading(true);
       const loadingToast = toast.loading('Step 1: Uploading...');
@@ -99,43 +106,65 @@ export const SetupUpload: React.FC = () => {
         setCatalogInfo(form.catalog, form.schema, form.volume);
         updateState({ schema: form.schema });
 
-        const uploadRes = (await databricksApi.uploadFile(
-          uploadedFile, form.catalog, form.schema, form.volume, form.token
-        )) as any;
-
-        const path = uploadRes?.data?.dbfs_path || uploadRes?.dbfs_path;
-
-        if (path) {
-          toast.loading('Processing and profiling uploaded files...', { id: loadingToast });
-          
-          const readRes = (await databricksApi.readFiles(
-            path, 
-            form.token,   
-            form.catalog, 
-            form.schema   
+        for (const file of uploadedFiles) {
+          const uploadRes = (await databricksApi.uploadFile(
+            file, form.catalog, form.schema, form.volume, form.token
           )) as any;
 
-          console.log("Read API Raw Response:", readRes);
-          
-          const actualState = readRes?.data?.data?.data; 
+          const path = uploadRes?.data?.dbfs_path || uploadRes?.dbfs_path;
 
-          if (actualState && actualState.df_heads) {
-            (updateState as any)({
-              dbfs_path: actualState.dbfs_path,
-              df_heads: actualState.df_heads,
-              df_dtypes: actualState.df_dtypes || {},
-              pii_columns: actualState.pii_columns || [],
-              phi_columns: actualState.phi_columns || [],
-              sensitive_metadata: actualState.sensitive_metadata || {},
-            });
+          if (path) {
+            toast.loading(`Processing ${file.name}...`, { id: loadingToast });
             
-            toast.success('Preview loaded successfully!', { id: loadingToast });
-          } else {
-          // This logs if the path we used above (readRes.data.data.data) was wrong
-          console.log("ActualState check failed. actualState is:", actualState);
-          toast.error("Data found but path mapping failed. Check console.", { id: loadingToast });
+            const readRes = (await databricksApi.readFiles(
+              path, 
+              form.token,   
+              form.catalog, 
+              form.schema   
+            )) as any;
+
+            console.log("Read API Raw Response:", readRes);
+            
+            const actualState = readRes?.data?.data?.data; 
+
+            if (actualState && actualState.df_heads) {
+              const current = useAgentStore.getState() as any;
+              const mergedHeads = {
+                ...(current.df_heads || {}),
+                ...(actualState.df_heads || {}),
+              };
+              const mergedDtypes = {
+                ...(current.df_dtypes || {}),
+                ...(actualState.df_dtypes || {}),
+              };
+              const mergedPii = Array.from(
+                new Set([...(current.pii_columns || []), ...(actualState.pii_columns || [])])
+              );
+              const mergedPhi = Array.from(
+                new Set([...(current.phi_columns || []), ...(actualState.phi_columns || [])])
+              );
+              const mergedSensitive = {
+                ...(current.sensitive_metadata || {}),
+                ...(actualState.sensitive_metadata || {}),
+              };
+
+              (updateState as any)({
+                dbfs_path: actualState.dbfs_path,
+                df_heads: mergedHeads,
+                df_dtypes: mergedDtypes,
+                pii_columns: mergedPii,
+                phi_columns: mergedPhi,
+                sensitive_metadata: mergedSensitive,
+              });
+              
+              toast.success(`${file.name} uploaded`, { id: loadingToast });
+            } else {
+              console.log("ActualState check failed. actualState is:", actualState);
+              toast.error("Data found but path mapping failed. Check console.", { id: loadingToast });
+            }
+          }
         }
-        }
+        setUploadedFiles([]);
       } catch (err) {
         console.error("Critical Error:", err);
         toast.error('Network error during processing', { id: loadingToast });
@@ -209,24 +238,49 @@ export const SetupUpload: React.FC = () => {
 
         <FileUploader onFileSelect={handleFileSelect} />
 
-        {uploadedFile && (
-          <div className="mt-4 flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-            <div>
-              <p className="text-sm font-medium text-gray-900">{uploadedFile.name}</p>
-              <p className="text-xs text-gray-500">
-                {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
-              </p>
-            </div>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handleFileUpload}
-              isLoading={isUploading}
-            >
-              Upload to Databricks
-            </Button>
+        {uploadedFiles.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {uploadedFiles.map((file, idx) => (
+              <div
+                key={`${file.name}-${idx}`}
+                className="flex items-center justify-between px-4 py-3 bg-gray-50 border border-dashed border-slate-200 rounded-lg text-sm text-slate-700"
+              >
+                <div className="flex-1">
+                  <p className="font-medium">{file.name}</p>
+                  <p className="text-[11px] text-slate-500">
+                    {(file.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
+                </div>
+                <button
+                  className="text-xs text-red-600 hover:text-red-800"
+                  onClick={() => handleRemoveFile(idx)}
+                  type="button"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
           </div>
         )}
+
+        <div className="mt-4 flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+          <div>
+            <p className="text-sm font-medium text-gray-900">
+              {uploadedFiles.length > 0 ? `${uploadedFiles.length} file(s) queued` : 'No files selected'}
+            </p>
+            <p className="text-[11px] text-gray-500">
+              We upload files sequentially; the last one processed becomes the active dataset.
+            </p>
+          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleFileUpload}
+            isLoading={isUploading}
+          >
+            Upload to Databricks
+          </Button>
+        </div>
       </Card>
 
       {/* Data Preview Section */}
